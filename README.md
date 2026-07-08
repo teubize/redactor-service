@@ -32,24 +32,6 @@ C'est volontaire — voir « Licence » ci-dessous.
 à la ligne est fournie ligne par ligne). `black: true` force un caviardage
 noir sans libellé. `not_found` liste les refs non localisées graphiquement.
 
-## Licence — pourquoi ce dépôt est AGPL et pas le reste d'Anonymia
-
-Ce service dépend de **PyMuPDF**, distribué sous GNU AGPL v3. L'article 13
-de l'AGPL impose d'offrir le code source aux utilisateurs qui interagissent
-avec le logiciel via un réseau. Ce dépôt **est** cette offre : il contient
-l'intégralité du « Corresponding Source » du service (code, Dockerfile,
-dépendances) et est publié sous **AGPL-3.0-only** (fichier `LICENSE`).
-
-Le reste d'Anonymia (analyse Presidio, frontend, orchestration) s'exécute
-dans des **processus séparés** qui communiquent avec ce service par HTTP :
-au sens de la GPL/AGPL ce sont des œuvres distinctes (« mere aggregation »),
-non soumises au copyleft. La frontière de processus est la frontière de
-licence.
-
-Vous pouvez utiliser, modifier et redistribuer ce service selon les termes
-de l'AGPL v3. Toute version modifiée exposée en réseau doit offrir ses
-sources de la même manière.
-
 ## Lancer seul
 
 ```bash
