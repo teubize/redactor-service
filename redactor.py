@@ -21,17 +21,59 @@ from typing import Any, Dict, List, Tuple
 
 import fitz  # PyMuPDF (AGPL v3)
 
-MIN_SNIPPET_LEN = 2
+MIN_SNIPPET_LEN = 4
 
 
 def _locate(page: "fitz.Page", snippets: List[str]) -> List["fitz.Rect"]:
-    """Localise chaque ligne d'un extrait sur la page (entités multi-lignes)."""
+    """Recherche textuelle de SECOURS (quand le plan ne fournit pas de rects).
+
+    v1.1 : la recherche par sous-chaîne n'est plus le mécanisme principal —
+    elle caviardait « EUR » au milieu de « HEURTEBIZE » et détruisait le
+    document. Les plans v1.1 transportent des rectangles ; ce chemin ne
+    sert qu'aux plans anciens ou aux entités sans coordonnées, avec un
+    minimum de longueur relevé pour limiter les dégâts.
+    """
     rects: List[fitz.Rect] = []
     for raw in snippets:
         snippet = (raw or "").strip()
         if len(snippet) >= MIN_SNIPPET_LEN:
             rects.extend(page.search_for(snippet))
     return rects
+
+
+def _rects_from_plan(page: "fitz.Page", raw: Any) -> List["fitz.Rect"]:
+    """Convertit les rectangles du plan (x0, top, x1, bottom) en fitz.Rect.
+
+    pdfplumber (émetteur du plan) et PyMuPDF partagent la même convention :
+    origine en haut à gauche, y vers le bas, points PDF. On borne au cadre
+    de la page par sécurité.
+    """
+    rects: List[fitz.Rect] = []
+    if not isinstance(raw, list):
+        return rects
+    bounds = page.rect
+    for spec in raw:
+        try:
+            rect = fitz.Rect(*[float(v) for v in spec]) & bounds
+        except (TypeError, ValueError):
+            continue
+        if not rect.is_empty and rect.is_valid:
+            rects.append(rect)
+    return rects
+
+
+def _scrub_metadata(doc: "fitz.Document") -> None:
+    """Neutralise les métadonnées : Title/Author d'un acte réel portent
+    souvent les noms des parties — une fuite invisible à l'écran."""
+    doc.set_metadata({
+        "title": "Document anonymisé",
+        "author": "", "subject": "", "keywords": "",
+        "creator": "Anonymia", "producer": "Anonymia Redactor",
+    })
+    try:
+        doc.del_xml_metadata()
+    except Exception:  # certaines versions PyMuPDF n'exposent pas l'appel
+        pass
 
 
 def apply_plan(
@@ -64,7 +106,9 @@ def apply_plan(
             page = doc[index]
 
             for item in page_spec.get("redactions", []):
-                rects = _locate(page, item.get("snippets", []))
+                rects = _rects_from_plan(page, item.get("rects"))
+                if not rects:
+                    rects = _locate(page, item.get("snippets", []))
                 if not rects:
                     not_found.append(str(item.get("ref", "")))
                     continue
@@ -86,6 +130,7 @@ def apply_plan(
             # images chevauchantes.
             page.apply_redactions()
 
+        _scrub_metadata(doc)
         return doc.tobytes(garbage=3, deflate=True), not_found, applied
     finally:
         doc.close()
