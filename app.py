@@ -23,7 +23,7 @@ import os
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 
-from redactor import apply_plan
+from redactor import apply_plan, restore_plan
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "info").upper(),
@@ -80,4 +80,47 @@ async def redact(
         "pdf_base64": base64.b64encode(pdf_bytes).decode(),
         "not_found": not_found,
         "applied": applied,
+    }
+
+
+@app.post("/restore")
+async def restore(
+    file: UploadFile = File(...),
+    restorations: str = Form(...),
+) -> dict:
+    """Réécrit les valeurs d'origine à la place des pseudonymes d'un PDF.
+
+    Symétrique de /redact, et soumis à la même frontière de licence : c'est
+    ici, dans le service AGPL, que vit tout le code PyMuPDF. L'anonymizer
+    propriétaire fournit la liste {label -> valeur} (issue du dico déchiffré
+    par la clé de l'utilisateur) et ne touche jamais à `fitz`.
+
+    Le service ne conserve rien : ni le PDF, ni les valeurs. La liste
+    `restorations` transite en mémoire le temps de la requête.
+    """
+    data = await file.read()
+    if not data.startswith(b"%PDF-"):
+        raise HTTPException(status_code=415, detail={"code": "NOT_A_PDF"})
+    if len(data) > MAX_BYTES:
+        raise HTTPException(status_code=413, detail={"code": "FILE_TOO_LARGE"})
+
+    try:
+        parsed = json.loads(restorations)
+        assert isinstance(parsed, list)
+    except (json.JSONDecodeError, AssertionError):
+        raise HTTPException(status_code=400, detail={"code": "INVALID_RESTORATIONS"})
+
+    try:
+        pdf_bytes, replaced, warnings = await run_in_threadpool(
+            restore_plan, data, parsed)
+    except Exception:
+        logger.exception("Restitution en échec")
+        raise HTTPException(status_code=500, detail={"code": "RESTORE_FAILED"})
+
+    # On ne journalise QUE des comptages : jamais un label, jamais une valeur.
+    logger.info("Restitution : %d remplacement(s)", replaced)
+    return {
+        "pdf_base64": base64.b64encode(pdf_bytes).decode(),
+        "replaced": replaced,
+        "warnings": warnings,
     }
